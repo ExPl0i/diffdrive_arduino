@@ -1,64 +1,98 @@
 #include "diffdrive_arduino/arduino_comms.h"
-// #include <ros/console.h>
-#include <rclcpp/rclcpp.hpp>
-#include <sstream>
-#include <cstdlib>
+#include <asio.hpp>      // Библиотека для асинхронного сетевого взаимодействия
+#include <iostream>      // Для вывода ошибок в консоль
+#include <sstream>       // Для работы со строковыми потоками
+#include <string>        // Для работы со строками
+#include <regex>         // Для работы с регулярными выражениями
 
+// Метод установки соединения с Arduino по UDP
+void ArduinoComms::setup(const std::string &host, int port)
+{
+    // Создаем объект для разрешения DNS-имен
+    asio::ip::udp::resolver resolver(io_context_);
 
-void ArduinoComms::setup(const std::string &serial_device, int32_t baud_rate, int32_t timeout_ms)
-{  
-    serial_conn_.setPort(serial_device);
-    serial_conn_.setBaudrate(baud_rate);
-    serial::Timeout tt = serial::Timeout::simpleTimeout(timeout_ms);
-    serial_conn_.setTimeout(tt); // This should be inline except setTimeout takes a reference and so needs a variable
-    serial_conn_.open();
-    // serial_conn_.(serial_device, baud_rate, serial::Timeout::simpleTimeout(timeout_ms));
+    // Формируем запрос на разрешение IP-адреса по хосту и порту
+    asio::ip::udp::resolver::query query(asio::ip::udp::v4(), host, std::to_string(port));
 
+    // Получаем итератор с информацией о целевом узле
+    asio::ip::udp::resolver::iterator iterator = resolver.resolve(query);
+
+    // Сохраняем конечную точку соединения (IP-адрес и порт Arduino)
+    endpoint_ = *iterator;
+
+    // Открываем UDP-сокет для отправки и приема данных
+    socket_.open(asio::ip::udp::v4());
 }
 
-
+// Отправляет пустое сообщение на Arduino для инициализации связи
 void ArduinoComms::sendEmptyMsg()
 {
-    std::string response = sendMsg("\r");
+    sendMsg("[0.0,0.0,0.0]\r"); // Отправляем сообщение с тремя нулевыми значениями
 }
 
+// Читает значения энкодеров с Arduino
 void ArduinoComms::readEncoderValues(int &val_1, int &val_2)
 {
-    std::string response = sendMsg("e\r");
+    // Отправка запроса на получение данных с энкодеров
+    // sendMsg("e\r"); // Закомментировано, но можно раскомментировать для явного запроса
 
-    std::string delimiter = " ";
-    size_t del_pos = response.find(delimiter);
-    std::string token_1 = response.substr(0, del_pos);
-    std::string token_2 = response.substr(del_pos + delimiter.length());
+    // Получаем ответ от Arduino
+    std::string response = receiveMsg();
 
-    val_1 = std::atoi(token_1.c_str());
-    val_2 = std::atoi(token_2.c_str());
+    // Регулярное выражение для поиска двух целых чисел в формате: [число, число]
+    std::regex regex("\\[(-?\\d+),(-?\\d+)\\]");
+    std::smatch matches;
+    
+    // Проверяем, соответствует ли ответ ожидаемому формату
+    if (std::regex_search(response, matches, regex) && matches.size() == 3)
+    {
+        val_1 = std::stoi(matches[1].str()); // Преобразуем первую строку в число (левый энкодер)
+        val_2 = std::stoi(matches[2].str()); // Преобразуем вторую строку в число (правый энкодер)
+    }
+    else
+    {
+        // Если формат данных неверный, выводим ошибку в консоль и присваиваем значения по умолчанию
+        std::cerr << "Received message with incorrect format: " << response << std::endl;
+        val_1 = 0;
+        val_2 = 0;
+    }
 }
 
-void ArduinoComms::setMotorValues(int val_1, int val_2)
+// Устанавливает значения скорости моторов (управляющие команды)
+void ArduinoComms::setMotorValues(float val_1, float val_2)
 {
     std::stringstream ss;
-    ss << "m " << val_1 << " " << val_2 << "\r";
-    sendMsg(ss.str(), false);
+    ss << "[" << val_2 << "," << val_1 * 0.95f << "," << val_1 + val_2 << "]";
+
+    sendMsg(ss.str()); // Отправляем команду на Arduino
 }
 
+// Устанавливает PID-параметры моторов (пропорциональный, дифференциальный, интегральный коэффициенты)
 void ArduinoComms::setPidValues(float k_p, float k_d, float k_i, float k_o)
 {
     std::stringstream ss;
     ss << "u " << k_p << ":" << k_d << ":" << k_i << ":" << k_o << "\r";
-    sendMsg(ss.str());
+
+    // Закомментирован вызов отправки, можно раскомментировать для реальной работы
+    // sendMsg(ss.str());
 }
 
-std::string ArduinoComms::sendMsg(const std::string &msg_to_send, bool print_output)
+// Отправляет сообщение через UDP-сокет
+void ArduinoComms::sendMsg(const std::string &msg_to_send)
 {
-    serial_conn_.write(msg_to_send);
-    std::string response = serial_conn_.readline();
-
-    if (print_output)
-    {
-        // RCLCPP_INFO_STREAM(logger_,"Sent: " << msg_to_send);
-        // RCLCPP_INFO_STREAM(logger_,"Received: " << response);
-    }
-
-    return response;
+    socket_.send_to(asio::buffer(msg_to_send), endpoint_);
 }
+
+// Получает сообщение через UDP-сокет
+std::string ArduinoComms::receiveMsg()
+{
+    // Объявляем объект для хранения информации об отправителе
+    asio::ip::udp::endpoint sender_endpoint;
+
+    // Получаем данные в буфер и определяем их длину
+    size_t len = socket_.receive_from(asio::buffer(recv_buffer_), sender_endpoint);
+
+    // Возвращаем строку с полученными данными
+    return std::string(recv_buffer_, len);
+}
+
