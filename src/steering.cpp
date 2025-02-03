@@ -18,7 +18,7 @@ void Steering::setup(const std::string &steering_name, double steering_angle)
 }
 
 // Метод вычисления угла поворота колеса на основе данных энкодера
-double Wheel::calcEncAngle()
+double Steering::calcEncAngle()
 {
   return enc * rads_per_count;  // Угол поворота = число шагов энкодера * радианы за один шаг
 }
