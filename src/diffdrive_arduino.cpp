@@ -94,8 +94,8 @@ return_type DiffDriveArduino::configure(const hardware_interface::HardwareInfo &
     fr_wheel_.setup(cfg_.front_right_wheel_name, cfg_.enc_counts_per_rev);
     rl_wheel_.setup(cfg_.rear_left_wheel_name, cfg_.enc_counts_per_rev);
     rr_wheel_.setup(cfg_.rear_right_wheel_name, cfg_.enc_counts_per_rev);
-    f_steering_.setup(cfg_.front_steering_name, cfg_.enc_counts_per_rev);
-    r_steering_.setup(cfg_.front_steering_name, cfg_.enc_counts_per_rev);
+    f_steering_.setup(cfg_.front_steering_name);
+    r_steering_.setup(cfg_.rear_steering_name);
 
     // Настраиваем подключение к Arduino
     arduino_.setup(cfg_.host, cfg_.port);

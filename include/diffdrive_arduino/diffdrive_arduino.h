@@ -13,6 +13,7 @@
 
 #include "config.h"
 #include "wheel.h"
+#include "steering.h"
 #include "arduino_comms.h"
 
 using hardware_interface::return_type;
@@ -44,6 +45,8 @@ private:
   Wheel fr_wheel_;
   Wheel rl_wheel_;
   Wheel rr_wheel_;
+  Steering f_steering_;
+  Steering r_steering_;
   
 
   rclcpp::Logger logger_;
