@@ -20,7 +20,7 @@ class Steering {
 public:
     std::string name = "";
 
-    void setup(const std::string &steering_name);
+    void setup(const std::string &steering_name, float axle_offset, float track_width, float steering_sign);
 
     /**
      * @brief Конструктор.

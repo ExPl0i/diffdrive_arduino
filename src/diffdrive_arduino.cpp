@@ -1,5 +1,6 @@
 #include "diffdrive_arduino/diffdrive_arduino.h"
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
+#include "steering.cpp"
 
 // Конструктор класса DiffDriveArduino
 DiffDriveArduino::DiffDriveArduino()
@@ -16,6 +17,16 @@ return_type DiffDriveArduino::configure(const hardware_interface::HardwareInfo &
     }
 
     RCLCPP_INFO(logger_, "Configuring..."); // Логируем начало конфигурации
+
+    // Задаём параметры передней поворотной оси:
+    float f_axle_offset = 0.262f;    // Примерное смещение оси (в метрах)
+    float f_track_width = 0.234f;    // Примерное расстояние между колёсами (в метрах)
+    float f_steering_sign = 1.0f;  // +1 для передней оси (или -1 для задней оси)
+
+    // Задаём параметры задней поворотной оси:
+    float r_axle_offset = 0.262f;    // Примерное смещение оси (в метрах)
+    float r_track_width = 0.234f;    // Примерное расстояние между колёсами (в метрах)
+    float r_steering_sign = -1.0f;  // +1 для передней оси (или -1 для задней оси) 
 
     // Запоминаем текущее время
     time_ = std::chrono::system_clock::now();
@@ -94,8 +105,8 @@ return_type DiffDriveArduino::configure(const hardware_interface::HardwareInfo &
     fr_wheel_.setup(cfg_.front_right_wheel_name, cfg_.enc_counts_per_rev);
     rl_wheel_.setup(cfg_.rear_left_wheel_name, cfg_.enc_counts_per_rev);
     rr_wheel_.setup(cfg_.rear_right_wheel_name, cfg_.enc_counts_per_rev);
-    f_steering_.setup(cfg_.front_steering_name);
-    r_steering_.setup(cfg_.rear_steering_name);
+    f_steering_.setup(cfg_.front_steering_name, f_axle_offset, f_track_width, f_steering_sign);
+    r_steering_.setup(cfg_.rear_steering_name, r_axle_offset, r_track_width, r_steering_sign);
 
     // Настраиваем подключение к Arduino
     arduino_.setup(cfg_.host, cfg_.port);
