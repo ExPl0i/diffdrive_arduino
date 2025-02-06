@@ -1,11 +1,28 @@
 #include "diffdrive_arduino/diffdrive_arduino.h"
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
 #include "steering.cpp"
+#include "rclcpp/rclcpp.hpp"
+#include "geometry_msgs/msg/twist.hpp"
+#include "nav_msgs/msg/odometry.hpp"
 
 // Конструктор класса DiffDriveArduino
 DiffDriveArduino::DiffDriveArduino()
     : logger_(rclcpp::get_logger("DiffDriveArduino")) // Инициализация логгера
 {}
+
+return_type DiffDriveArduino:: Node(diffDriveArduino) 
+{
+    // Подписка на cmd_vel
+    cmd_vel_subscriber_ = this->create_subscription<geometry_msgs::msg::Twist>(
+    "cmd_vel", 10,
+    std::bind(&DiffDriveNode::cmdVelCallback, this, std::placeholders::_1));
+
+    // Публикация одометрии
+    odom_publisher_ = this->create_publisher<nav_msgs::msg::Odometry>("odom", 10);
+
+    // Таймер для периодического обновления одометрии (например, 10 Гц)
+    timer_ = this->create_wall_timer(100ms, std::bind(&DiffDriveNode::updateOdometry, this));
+}
 
 // Метод конфигурации оборудования
 return_type DiffDriveArduino::configure(const hardware_interface::HardwareInfo &info)
@@ -117,46 +134,6 @@ return_type DiffDriveArduino::configure(const hardware_interface::HardwareInfo &
     return return_type::OK;
 }
 
-// Экспорт интерфейсов состояния оборудования (состояние скорости и позиции для каждого колеса)
-std::vector<hardware_interface::StateInterface> DiffDriveArduino::export_state_interfaces()
-{
-    std::vector<hardware_interface::StateInterface> state_interfaces;
-
-    // Добавляем интерфейсы скорости и позиции для левого переднего колеса
-    state_interfaces.emplace_back(hardware_interface::StateInterface(fl_wheel_.name, hardware_interface::HW_IF_VELOCITY, &fl_wheel_.vel));
-    state_interfaces.emplace_back(hardware_interface::StateInterface(fl_wheel_.name, hardware_interface::HW_IF_POSITION, &fl_wheel_.pos));
-
-    // Добавляем интерфейсы скорости и позиции для правого переднего колеса
-    state_interfaces.emplace_back(hardware_interface::StateInterface(fr_wheel_.name, hardware_interface::HW_IF_VELOCITY, &fr_wheel_.vel));
-    state_interfaces.emplace_back(hardware_interface::StateInterface(fr_wheel_.name, hardware_interface::HW_IF_POSITION, &fr_wheel_.pos));
-
-    // Добавляем интерфейсы скорости и позиции для левого заднего колеса
-    state_interfaces.emplace_back(hardware_interface::StateInterface(rl_wheel_.name, hardware_interface::HW_IF_VELOCITY, &rl_wheel_.vel));
-    state_interfaces.emplace_back(hardware_interface::StateInterface(rl_wheel_.name, hardware_interface::HW_IF_POSITION, &rl_wheel_.pos));
-
-    // Добавляем интерфейсы скорости и позиции для правого заднего колеса
-    state_interfaces.emplace_back(hardware_interface::StateInterface(rr_wheel_.name, hardware_interface::HW_IF_VELOCITY, &rr_wheel_.vel));
-    state_interfaces.emplace_back(hardware_interface::StateInterface(rr_wheel_.name, hardware_interface::HW_IF_POSITION, &rr_wheel_.pos));
-
-    return state_interfaces;
-}
-
-// Экспорт интерфейсов команд (команды скорости для каждого колеса)
-std::vector<hardware_interface::CommandInterface> DiffDriveArduino::export_command_interfaces()
-{
-    std::vector<hardware_interface::CommandInterface> command_interfaces;
-
-    // Добавляем командные интерфейсы для управления скоростью передних колес
-    command_interfaces.emplace_back(hardware_interface::CommandInterface(fl_wheel_.name, hardware_interface::HW_IF_VELOCITY, &fl_wheel_.cmd));
-    command_interfaces.emplace_back(hardware_interface::CommandInterface(fr_wheel_.name, hardware_interface::HW_IF_VELOCITY, &fr_wheel_.cmd));
-
-     // Добавляем командные интерфейсы для управления скоростью задних колес
-    command_interfaces.emplace_back(hardware_interface::CommandInterface(rl_wheel_.name, hardware_interface::HW_IF_VELOCITY, &rl_wheel_.cmd));
-    command_interfaces.emplace_back(hardware_interface::CommandInterface(rr_wheel_.name, hardware_interface::HW_IF_VELOCITY, &rr_wheel_.cmd));
-
-    return command_interfaces;
-}
-
 // Метод запуска контроллера
 return_type DiffDriveArduino::start()
 {
@@ -208,7 +185,7 @@ hardware_interface::return_type DiffDriveArduino::read()
     fr_wheel_.vel = (fr_wheel_.pos - pos_prev) / deltaSeconds;
 
     // Вычисляем новое положение и скорость левого заднего колеса
-    double pos_prev = rl_wheel_.pos;
+    pos_prev = rl_wheel_.pos;
     rl_wheel_.pos = rl_wheel_.calcEncAngle();
     rl_wheel_.vel = (rl_wheel_.pos - pos_prev) / deltaSeconds;// Вычисляем скорость вращения левого колеса (угловую скорость) - Разница между текущим и предыдущим положением делится на прошедшее время
 
@@ -219,6 +196,116 @@ hardware_interface::return_type DiffDriveArduino::read()
 
     return return_type::OK;
 }
+
+
+hardware_interface::return_type DiffDriveArduino::cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg)
+{
+    // Расстояние между колесами
+    double wheel_separation = 0.234f;
+
+    // Получение линейной и угловой скоростей из /cmd_vel
+    double linear_vel = msg->linear.x;
+    double angular_vel = msg->angular.z;
+
+    // Расчёт углов поворота повротных осей:
+    f_steering_.update(linear_vel, angular_vel);
+    r_steering_.update(linear_vel, angular_vel);
+    double f_angle = f_steering_.gegetSteeringAngle();
+    double r_angle = r_steering_.gegetSteeringAngle();
+
+    // Расчёт скоростей для левых и правых колёс:
+    double v_left = linear_vel - angular_vel * wheel_separation / 2.0;
+    double v_right = linear_vel + angular_vel * wheel_separation / 2.0;
+
+    // Отправка команд на Arduino
+    sendCommandsToArduino(v_left, v_right, f_angle, r_angle);
+}
+
+hardware_interface::return_type DiffDriveArduino::sendCommandsToArduino(double v_left, double v_right, double f_angle, double r_angle)
+{
+    // Настраиваем подключение к Arduino
+    arduino_.setup(cfg_.host, cfg_.port);
+    // Проверяем соединение с Arduino
+    if (!arduino_.connected())
+    {
+        return return_type::ERROR;
+    }
+
+    // Отправляем управляющие команды на Arduino
+    arduino_.setMotorValues(v_left / fl_wheel_.rads_per_count / cfg_.loop_rate, 
+                            v_right / fr_wheel_.rads_per_count / cfg_.loop_rate,
+                            v_left / rl_wheel_.rads_per_count / cfg_.loop_rate, 
+                            v_right/ rr_wheel_.rads_per_count / cfg_.loop_rate,);
+
+    return return_type::OK;
+
+
+    RCLCPP_INFO(this->get_logger(), "Sending commands: left=%f, right=%f", v_left, v_right);
+}
+
+hardware_interface::return_type DiffDriveArduino::updateOdometry()
+{
+    // Здесь необходимо считывать данные с Arduino (например, значения энкодеров)
+    // и на их основе вычислять одометрию.
+    nav_msgs::msg::Odometry odom_msg;
+    odom_msg.header.stamp = this->now();
+    odom_msg.header.frame_id = "odom";
+
+    // Заполните поля сообщения odom_msg:
+    // odom_msg.pose.pose.position, odom_msg.twist.twist.linear, odom_msg.twist.twist.angular и т.д.
+    // Например, если вы рассчитали одометрические данные:
+    // odom_msg.twist.twist.linear.x = calculated_linear_velocity;
+    // odom_msg.twist.twist.angular.z = calculated_angular_velocity;
+
+    odom_publisher_->publish(odom_msg);
+}
+
+rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_subscriber_;
+rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_publisher_;
+rclcpp::TimerBase::SharedPtr timer_;
+
+
+
+// Экспорт интерфейсов состояния оборудования (состояние скорости и позиции для каждого колеса)
+std::vector<hardware_interface::StateInterface> DiffDriveArduino::export_state_interfaces()
+{
+    std::vector<hardware_interface::StateInterface> state_interfaces;
+
+    // Добавляем интерфейсы скорости и позиции для левого переднего колеса
+    state_interfaces.emplace_back(hardware_interface::StateInterface(fl_wheel_.name, hardware_interface::HW_IF_VELOCITY, &fl_wheel_.vel));
+    state_interfaces.emplace_back(hardware_interface::StateInterface(fl_wheel_.name, hardware_interface::HW_IF_POSITION, &fl_wheel_.pos));
+
+    // Добавляем интерфейсы скорости и позиции для правого переднего колеса
+    state_interfaces.emplace_back(hardware_interface::StateInterface(fr_wheel_.name, hardware_interface::HW_IF_VELOCITY, &fr_wheel_.vel));
+    state_interfaces.emplace_back(hardware_interface::StateInterface(fr_wheel_.name, hardware_interface::HW_IF_POSITION, &fr_wheel_.pos));
+
+    // Добавляем интерфейсы скорости и позиции для левого заднего колеса
+    state_interfaces.emplace_back(hardware_interface::StateInterface(rl_wheel_.name, hardware_interface::HW_IF_VELOCITY, &rl_wheel_.vel));
+    state_interfaces.emplace_back(hardware_interface::StateInterface(rl_wheel_.name, hardware_interface::HW_IF_POSITION, &rl_wheel_.pos));
+
+    // Добавляем интерфейсы скорости и позиции для правого заднего колеса
+    state_interfaces.emplace_back(hardware_interface::StateInterface(rr_wheel_.name, hardware_interface::HW_IF_VELOCITY, &rr_wheel_.vel));
+    state_interfaces.emplace_back(hardware_interface::StateInterface(rr_wheel_.name, hardware_interface::HW_IF_POSITION, &rr_wheel_.pos));
+
+    return state_interfaces;
+}
+
+// Экспорт интерфейсов команд (команды скорости для каждого колеса)
+std::vector<hardware_interface::CommandInterface> DiffDriveArduino::export_command_interfaces()
+{
+    std::vector<hardware_interface::CommandInterface> command_interfaces;
+
+    // Добавляем командные интерфейсы для управления скоростью передних колес
+    command_interfaces.emplace_back(hardware_interface::CommandInterface(fl_wheel_.name, hardware_interface::HW_IF_VELOCITY, &fl_wheel_.cmd));
+    command_interfaces.emplace_back(hardware_interface::CommandInterface(fr_wheel_.name, hardware_interface::HW_IF_VELOCITY, &fr_wheel_.cmd));
+
+     // Добавляем командные интерфейсы для управления скоростью задних колес
+    command_interfaces.emplace_back(hardware_interface::CommandInterface(rl_wheel_.name, hardware_interface::HW_IF_VELOCITY, &rl_wheel_.cmd));
+    command_interfaces.emplace_back(hardware_interface::CommandInterface(rr_wheel_.name, hardware_interface::HW_IF_VELOCITY, &rr_wheel_.cmd));
+
+    return command_interfaces;
+}
+
 
 // Метод записи команд в оборудование (отправка управляющих сигналов на Arduino)
 hardware_interface::return_type DiffDriveArduino::write()
