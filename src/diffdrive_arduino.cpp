@@ -303,46 +303,68 @@ return_type DiffDriveArduino::sendCommandsToArduino(double v_left, double v_righ
 // (метод Эйлера) для определения нового положения, и формируется сообщение одометрии, которое публикуется.
 return_type DiffDriveArduino::updateOdometry()
 {
-    // Сначала обновляем данные с оборудования (считываем значения энкодеров)
+    // 1. Сначала обновляем данные с оборудования (считываем значения энкодеров)
     if (read() != return_type::OK) {
         return return_type::ERROR;
     }
     
-    // Получаем текущее время в формате ROS2 и вычисляем прошедшее время (dt) с момента последнего обновления
+    // 2. Получаем текущее время (ROS2 Time) и вычисляем прошедшее время dt с момента последнего обновления
     rclcpp::Time current_time = this->now();
     double dt = (current_time - last_odom_time_).seconds();
     last_odom_time_ = current_time;
     
-    // Вычисляем среднюю угловую скорость для левой и правой сторон робота
-    double left_wheel_angular_velocity  = (fl_wheel_.vel + rl_wheel_.vel) / 2.0;
-    double right_wheel_angular_velocity = (fr_wheel_.vel + rr_wheel_.vel) / 2.0;
+    // 3. Рассчитываем линейные скорости для каждого колеса, умножая угловую скорость (полученную из энкодера)
+    //    на радиус колеса.
+    double V_FL = wheel_radius_ * fl_wheel_.vel;  // Скорость переднего левого колеса
+    double V_FR = wheel_radius_ * fr_wheel_.vel;  // Скорость переднего правого колеса
+    double V_RL = wheel_radius_ * rl_wheel_.vel;  // Скорость заднего левого колеса
+    double V_RR = wheel_radius_ * rr_wheel_.vel;  // Скорость заднего правого колеса
+
+    // 4. Получаем углы поворотных осей (стиринга) для передней и задней осей.
+    //    Предполагается, что метод gegetSteeringAngle() возвращает угол в градусах.
+    double theta_f = f_steering_.gegetSteeringAngle();  // Угол переднего стиринга (градусы)
+    double theta_r = r_steering_.gegetSteeringAngle();   // Угол заднего стиринга (градусы)
     
-    // Преобразуем угловые скорости в линейные скорости с помощью формулы v = r * ω
-    double v_left  = wheel_radius_ * left_wheel_angular_velocity;
-    double v_right = wheel_radius_ * right_wheel_angular_velocity;
+    // 5. Задаём параметры, необходимые для расчёта:
+    //    L_f и L_r — расстояния, используемые в расчётах (например, расстояния от осей до центра поворота);
+    //    W — расстояние между левыми и правыми колесами (ширина колеи).
+    //    Здесь в качестве примера используются фиксированные значения, которые можно заменить
+    //    на параметры из конфигурации, если они у вас заданы.
+    double L_f = 0.262;   // Примерное значение для передней оси (м)
+    double L_r = 0.262;   // Примерное значение для задней оси (м)
+    double W   = 0.234;   // Расстояние между левыми и правыми колесами (м)
     
-    // Вычисляем линейную скорость робота как среднее значение скоростей левой и правой сторон.
-    // Угловая скорость определяется разностью скоростей, делённой на расстояние между колесами (wheel_base_).
-    double linear_velocity  = (v_left + v_right) / 2.0;
-    double angular_velocity = (v_right - v_left) / wheel_base_;
+    // 6. Вызываем ваш метод расчёта, который принимает скорости всех четырёх колес, углы стиринга,
+    //    а также параметры L_f, L_r и W. Метод должен вернуть пару значений:
+    //       - linear_velocity: линейная скорость транспортного средства (V)
+    //       - angular_velocity: угловая скорость транспортного средства (ω)
+    std::pair<double, double> speed_and_omega = f_steering_.computeVehicleSpeedAndOmega(
+          V_FL, V_FR, V_RL, V_RR,  // Скорости для всех четырёх колес
+          theta_f, theta_r,        // Углы поворотных осей (градусы)
+          L_f, L_r,                // Параметры для расчёта (расстояния)
+          W);                      // Расстояние между колесами
+
+    double linear_velocity  = speed_and_omega.first;   // Линейная скорость (м/с)
+    double angular_velocity = speed_and_omega.second;  // Угловая скорость (рад/с)
     
-    // Интегрируем скорости (методом Эйлера) для вычисления смещения робота за прошедшее время dt.
+    // 7. Интегрируем полученные скорости методом Эйлера для обновления положения робота:
+    //    Вычисляем приращения по оси X, Y и изменение угла ориентации.
     double delta_x     = linear_velocity * std::cos(theta_) * dt;
     double delta_y     = linear_velocity * std::sin(theta_) * dt;
     double delta_theta = angular_velocity * dt;
     
-    // Обновляем положение робота
+    // 8. Обновляем одометрические координаты робота.
     x_     += delta_x;
     y_     += delta_y;
     theta_ += delta_theta;
     
-    // Формируем сообщение одометрии для публикации
+    // 9. Формируем сообщение одометрии для публикации.
     nav_msgs::msg::Odometry odom_msg;
-    odom_msg.header.stamp    = current_time;    // Устанавливаем временную метку сообщения
+    odom_msg.header.stamp    = current_time;    // Устанавливаем временную метку
     odom_msg.header.frame_id = "odom";          // Фиксированная система координат одометрии
-    odom_msg.child_frame_id  = "base_link";       // Координатная система, привязанная к роботу
+    odom_msg.child_frame_id  = "base_link";       // Система координат, привязанная к роботу
     
-    // Заполняем позиционные данные одометрии
+    // Заполняем позиционные данные
     odom_msg.pose.pose.position.x = x_;
     odom_msg.pose.pose.position.y = y_;
     odom_msg.pose.pose.position.z = 0.0;
@@ -355,7 +377,8 @@ return_type DiffDriveArduino::updateOdometry()
     odom_msg.pose.pose.orientation.z = q.z();
     odom_msg.pose.pose.orientation.w = q.w();
     
-    // Заполняем данные о линейной и угловой скорости
+    // Заполняем данные о скоростях:
+    // Линейная скорость передаётся в twist.linear.x, угловая — в twist.angular.z.
     odom_msg.twist.twist.linear.x  = linear_velocity;
     odom_msg.twist.twist.linear.y  = 0.0;
     odom_msg.twist.twist.linear.z  = 0.0;
@@ -363,11 +386,13 @@ return_type DiffDriveArduino::updateOdometry()
     odom_msg.twist.twist.angular.y = 0.0;
     odom_msg.twist.twist.angular.z = angular_velocity;
     
-    // Публикуем сообщение одометрии
+    // 10. Публикуем сообщение одометрии на соответствующем топике.
     odom_publisher_->publish(odom_msg);
     
-    // Выводим отладочное сообщение с текущими значениями одометрии (x, y, theta)
-    RCLCPP_DEBUG(this->get_logger(), "Odometry: x=%.2f, y=%.2f, theta=%.2f", x_, y_, theta_);
+    // 11. Выводим отладочное сообщение с текущими значениями одометрии и скоростей.
+    RCLCPP_DEBUG(this->get_logger(),
+                 "Odometry: x=%.2f, y=%.2f, theta=%.2f, V=%.2f, omega=%.2f",
+                 x_, y_, theta_, linear_velocity, angular_velocity);
     
     return return_type::OK;
 }

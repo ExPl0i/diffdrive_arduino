@@ -44,9 +44,7 @@ public:
      */
     double getSteeringAngle() const;
 
-    double computeVehicleSpeedAndOmega(
-    double V_FL, double V_FR, double V_RL, double V_RR,
-    double theta_f, double theta_r, double L_f, double L_r, double W);
+    double computeVehicleSpeedAndOmega(double V_FL, double V_FR, double V_RL, double V_RR, double theta_f, double theta_r, double L_f, double L_r, double W);
 
 private:
     double axle_offset_;    // Продольное смещение оси относительно центра робота.

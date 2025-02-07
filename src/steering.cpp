@@ -1,4 +1,5 @@
 #include "diffdrive_arduino/steering.h"
+#include <cmath>
 
 /**
  * Конструктор: сохраняет параметры оси.
@@ -107,9 +108,8 @@ double Steering::getSteeringAngle() const
  * Выполняет обратное преобразование: вычисляет линейную и угловую скорости
  * на основе скоростей колес и угла поворота оси.
  */
-double Steering::computeVehicleSpeedAndOmega(
-    double V_FL, double V_FR, double V_RL, double V_RR,
-    double theta_f, double theta_r, double L_f, double L_r, double W) {
+double Steering::computeVehicleSpeedAndOmega(double V_FL, double V_FR, double V_RL, double V_RR, double theta_f, double theta_r, double L_f, double L_r, double W) 
+{
     
     double theta_f_rad = theta_f * M_PI / 180.0;
     double theta_r_rad = theta_r * M_PI / 180.0;
