@@ -280,17 +280,8 @@ return_type DiffDriveArduino::sendCommandsToArduino(double v_left, double v_righ
                 "Sending commands: left=%f, right=%f, front_angle=%f, rear_angle=%f",
                 v_left, v_right, f_angle, r_angle);
 
-    // Отправляем команды для управления двигателями.
-    // Здесь значения команд делятся на коэффициент, рассчитанный по параметру rads_per_count и loop_rate,
-    // что обеспечивает корректное масштабирование команд.
-    arduino_.setMotorValues(v_left  / fl_wheel_.rads_per_count / cfg_.loop_rate, 
-                             v_right / fr_wheel_.rads_per_count / cfg_.loop_rate,
-                             v_left  / rl_wheel_.rads_per_count / cfg_.loop_rate, 
-                             v_right / rr_wheel_.rads_per_count / cfg_.loop_rate);
-
-    // Отправляем команды для управления углами поворотных осей.
-    arduino_.setAngleValues(f_angle / cfg_.loop_rate,
-                            r_angle / cfg_.loop_rate);
+    // Отправляем команды для управления двигателями и углами поворота
+    arduino_.setMotorValues(f_angle / r_angle / v_left  / v_right / cfg_.loop_rate);
 
     return return_type::OK;
 }
