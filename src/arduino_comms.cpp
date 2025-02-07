@@ -67,6 +67,15 @@ void ArduinoComms::setMotorValues(float val_1, float val_2)
     sendMsg(ss.str()); // Отправляем команду на Arduino
 }
 
+// Устанавливает значения угла поворота серв (управляющие команды)
+void ArduinoComms::setAngleValues(float val_1, float val_2) 
+{
+    std::stringstream ss;
+    ss << "[" << val_2 << "," << val_1 * 0.95f << "," << val_1 + val_2 << "]";
+
+    sendMsg(ss.str()); // Отправляем команду на Arduino
+}
+
 // Устанавливает PID-параметры моторов (пропорциональный, дифференциальный, интегральный коэффициенты)
 void ArduinoComms::setPidValues(float k_p, float k_d, float k_i, float k_o)
 {

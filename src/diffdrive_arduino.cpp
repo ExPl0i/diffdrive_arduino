@@ -1,123 +1,138 @@
-#include "diffdrive_arduino/diffdrive_arduino.h"
-#include "hardware_interface/types/hardware_interface_type_values.hpp"
-#include "steering.cpp"
-#include "rclcpp/rclcpp.hpp"
-#include "geometry_msgs/msg/twist.hpp"
-#include "nav_msgs/msg/odometry.hpp"
+#include "diffdrive_arduino/diffdrive_arduino.h"        // Подключение заголовочного файла данного класса
+#include "hardware_interface/types/hardware_interface_type_values.hpp"  // Типы значений для аппаратного интерфейса
+#include "rclcpp/rclcpp.hpp"                              // Основной заголовок ROS2
+#include "geometry_msgs/msg/twist.hpp"                   // Для работы с сообщениями типа Twist (команды скорости)
+#include "nav_msgs/msg/odometry.hpp"                     // Для работы с сообщениями одометрии
+#include <tf2/LinearMath/Quaternion.h>                   // Для работы с кватернионами (представление ориентации)
+#include <cmath>                                         // Для математических функций (cos, sin и т.д.)
 
+// ----------------------------------------------------------------------------------------
 // Конструктор класса DiffDriveArduino
+// ----------------------------------------------------------------------------------------
+// В конструкторе происходит инициализация узла ROS2 с именем "diff_drive_arduino", а также
+// создаются необходимые паблишер (для одометрии) и (при необходимости) подписчик (для команд скорости).
+// Кроме того, инициализируются переменные времени и начальное состояние робота.
 DiffDriveArduino::DiffDriveArduino()
-    : logger_(rclcpp::get_logger("DiffDriveArduino")) // Инициализация логгера
-{}
-
-return_type DiffDriveArduino:: Node(diffDriveArduino) 
+: Node("diff_drive_arduino")  // Инициализация узла ROS2 с заданным именем
 {
-    // Подписка на cmd_vel
-    cmd_vel_subscriber_ = this->create_subscription<geometry_msgs::msg::Twist>(
-    "cmd_vel", 10,
-    std::bind(&DiffDriveNode::cmdVelCallback, this, std::placeholders::_1));
-
-    // Публикация одометрии
+    // Создаём паблишер для одометрии на топике "odom" с размером очереди 10 сообщений.
     odom_publisher_ = this->create_publisher<nav_msgs::msg::Odometry>("odom", 10);
-
-    // Таймер для периодического обновления одометрии (например, 10 Гц)
-    timer_ = this->create_wall_timer(100ms, std::bind(&DiffDriveNode::updateOdometry, this));
+    
+    // (При необходимости) создаём подписчика на команды скорости (например, топик /cmd_vel).
+    // Раскомментируйте и настройте, если требуется:
+    // cmd_vel_subscriber_ = this->create_subscription<geometry_msgs::msg::Twist>(
+    //     "cmd_vel", 10,
+    //     std::bind(&DiffDriveArduino::cmdVelCallback, this, std::placeholders::_1)
+    // );
+    
+    // Инициализируем временные метки:
+    // - time_ используется для вычисления промежутка времени между вызовами метода read()
+    // - last_odom_time_ используется для расчёта дельты времени при обновлении одометрии
+    time_ = std::chrono::system_clock::now();
+    last_odom_time_ = this->now();
+    
+    // Устанавливаем начальные координаты и ориентацию робота (начальное положение: 0,0,0)
+    x_ = 0.0;
+    y_ = 0.0;
+    theta_ = 0.0;
+    
+    // Задаём базовые параметры робота:
+    wheel_radius_ = 0.1; // Радиус колеса в метрах
+    wheel_base_   = 0.5; // Расстояние между левыми и правыми колесами (база робота) в метрах
 }
 
-// Метод конфигурации оборудования
+// ----------------------------------------------------------------------------------------
+// Метод configure
+// ----------------------------------------------------------------------------------------
+// Метод для конфигурации оборудования. Здесь происходит считывание параметров из структуры info,
+// настройка объектов управления (колёса, стиринг) и установка соединения с Arduino.
 return_type DiffDriveArduino::configure(const hardware_interface::HardwareInfo &info)
 {
-    // Вызов стандартного метода конфигурации и проверка успешности
-    if (configure_default(info) != return_type::OK)
-    {
-        return return_type::ERROR;
-    }
+    // Выводим информационное сообщение о начале конфигурации.
+    RCLCPP_INFO(this->get_logger(), "Configuring...");
 
-    RCLCPP_INFO(logger_, "Configuring..."); // Логируем начало конфигурации
+    // Задаём примерные параметры для поворотных осей:
+    float f_axle_offset = 0.262f;    // Смещение передней оси
+    float f_track_width = 0.234f;      // Расстояние между колесами передней оси
+    float f_steering_sign = 1.0f;      // Знак для передней оси (обычно +1)
 
-    // Задаём параметры передней поворотной оси:
-    float f_axle_offset = 0.262f;    // Примерное смещение оси (в метрах)
-    float f_track_width = 0.234f;    // Примерное расстояние между колёсами (в метрах)
-    float f_steering_sign = 1.0f;  // +1 для передней оси (или -1 для задней оси)
+    float r_axle_offset = 0.262f;      // Смещение задней оси
+    float r_track_width = 0.234f;      // Расстояние между колесами задней оси
+    float r_steering_sign = -1.0f;     // Знак для задней оси (обычно -1)
 
-    // Задаём параметры задней поворотной оси:
-    float r_axle_offset = 0.262f;    // Примерное смещение оси (в метрах)
-    float r_track_width = 0.234f;    // Примерное расстояние между колёсами (в метрах)
-    float r_steering_sign = -1.0f;  // +1 для передней оси (или -1 для задней оси) 
-
-    // Запоминаем текущее время
+    // Обновляем временную метку
     time_ = std::chrono::system_clock::now();
 
+    // Считываем параметры оборудования из предоставленной структуры info.
     try
     {
-        // Получаем параметры оборудования из конфигурации
-        cfg_.front_left_wheel_name = info.hardware_parameters.at("front_left_wheel_name");
+        cfg_.front_left_wheel_name  = info.hardware_parameters.at("front_left_wheel_name");
         cfg_.front_right_wheel_name = info.hardware_parameters.at("front_right_wheel_name");
-        cfg_.rear_left_wheel_name = info.hardware_parameters.at("rear_left_wheel_name");
-        cfg_.rear_right_wheel_name = info.hardware_parameters.at("rear_right_wheel_name");
-        cfg_.front_steering_name = info.hardware_parameters.at("front_steering_name");
-        cfg_.rear_steering_name = info.hardware_parameters.at("rear_steering_name");
-        cfg_.loop_rate = std::stof(info.hardware_parameters.at("loop_rate"));
-        cfg_.host = info.hardware_parameters.at("host");
-        cfg_.port = std::stoi(info.hardware_parameters.at("port"));
-        cfg_.enc_counts_per_rev = std::stoi(info.hardware_parameters.at("enc_counts_per_rev")); //это их файла колесо
+        cfg_.rear_left_wheel_name   = info.hardware_parameters.at("rear_left_wheel_name");
+        cfg_.rear_right_wheel_name  = info.hardware_parameters.at("rear_right_wheel_name");
+        cfg_.front_steering_name     = info.hardware_parameters.at("front_steering_name");
+        cfg_.rear_steering_name      = info.hardware_parameters.at("rear_steering_name");
+        cfg_.loop_rate              = std::stof(info.hardware_parameters.at("loop_rate"));
+        cfg_.host                   = info.hardware_parameters.at("host");
+        cfg_.port                   = std::stoi(info.hardware_parameters.at("port"));
+        cfg_.enc_counts_per_rev     = std::stoi(info.hardware_parameters.at("enc_counts_per_rev"));
     }
-    catch (const std::invalid_argument& e) // Обрабатываем ошибку неверного формата параметров
+    // Обработка исключений, если какой-либо параметр отсутствует или имеет неверный формат.
+    catch (const std::invalid_argument& e)
     {
-        // Проверяем, какого параметра не хватает, и логируем ошибку
         if (info.hardware_parameters.find("front_left_wheel_name") == info.hardware_parameters.end())
         {
-            RCLCPP_ERROR(logger_, "Missing parameter: front_left_wheel_name");
+            RCLCPP_ERROR(this->get_logger(), "Missing parameter: front_left_wheel_name");
         }
         else if (info.hardware_parameters.find("front_right_wheel_name") == info.hardware_parameters.end())
         {
-            RCLCPP_ERROR(logger_, "Missing parameter: front_right_wheel_name");
+            RCLCPP_ERROR(this->get_logger(), "Missing parameter: front_right_wheel_name");
         }
         else if (info.hardware_parameters.find("rear_left_wheel_name") == info.hardware_parameters.end())
         {
-            RCLCPP_ERROR(logger_, "Missing parameter: rear_left_wheel_name");
+            RCLCPP_ERROR(this->get_logger(), "Missing parameter: rear_left_wheel_name");
         }
         else if (info.hardware_parameters.find("rear_right_wheel_name") == info.hardware_parameters.end())
         {
-            RCLCPP_ERROR(logger_, "Missing parameter: rear_right_wheel_name");
+            RCLCPP_ERROR(this->get_logger(), "Missing parameter: rear_right_wheel_name");
         }
         else if (info.hardware_parameters.find("front_steering_name") == info.hardware_parameters.end())
         {
-            RCLCPP_ERROR(logger_, "Missing parameter: front_steering_name");
+            RCLCPP_ERROR(this->get_logger(), "Missing parameter: front_steering_name");
         }
         else if (info.hardware_parameters.find("rear_steering_name") == info.hardware_parameters.end())
         {
-            RCLCPP_ERROR(logger_, "Missing parameter: rear_steering_name");
+            RCLCPP_ERROR(this->get_logger(), "Missing parameter: rear_steering_name");
         }
         else if (info.hardware_parameters.find("loop_rate") == info.hardware_parameters.end())
         {
-            RCLCPP_ERROR(logger_, "Missing parameter: loop_rate");
+            RCLCPP_ERROR(this->get_logger(), "Missing parameter: loop_rate");
         }
         else if (info.hardware_parameters.find("host") == info.hardware_parameters.end())
         {
-            RCLCPP_ERROR(logger_, "Missing parameter: host");
+            RCLCPP_ERROR(this->get_logger(), "Missing parameter: host");
         }
         else if (info.hardware_parameters.find("port") == info.hardware_parameters.end())
         {
-            RCLCPP_ERROR(logger_, "Missing parameter: port");
+            RCLCPP_ERROR(this->get_logger(), "Missing parameter: port");
         }
         else if (info.hardware_parameters.find("enc_counts_per_rev") == info.hardware_parameters.end())
         {
-            RCLCPP_ERROR(logger_, "Missing parameter: enc_counts_per_rev");
+            RCLCPP_ERROR(this->get_logger(), "Missing parameter: enc_counts_per_rev");
         }
         else
         {
-            RCLCPP_ERROR(logger_, "Invalid argument for parameter: %s", e.what());
+            RCLCPP_ERROR(this->get_logger(), "Invalid argument for parameter: %s", e.what());
         }
         return return_type::ERROR;
     }
-    catch (const std::out_of_range& e) // Обрабатываем ошибку выхода за границы значений
+    catch (const std::out_of_range& e)
     {
-        RCLCPP_ERROR(logger_, "Out of range for parameter: %s", e.what());
+        RCLCPP_ERROR(this->get_logger(), "Out of range for parameter: %s", e.what());
         return return_type::ERROR;
     }
 
-    // Настраиваем колеса и оси с полученными параметрами
+    // Настройка объектов колес и поворотных осей с использованием полученных параметров:
     fl_wheel_.setup(cfg_.front_left_wheel_name, cfg_.enc_counts_per_rev);
     fr_wheel_.setup(cfg_.front_right_wheel_name, cfg_.enc_counts_per_rev);
     rl_wheel_.setup(cfg_.rear_left_wheel_name, cfg_.enc_counts_per_rev);
@@ -125,211 +140,244 @@ return_type DiffDriveArduino::configure(const hardware_interface::HardwareInfo &
     f_steering_.setup(cfg_.front_steering_name, f_axle_offset, f_track_width, f_steering_sign);
     r_steering_.setup(cfg_.rear_steering_name, r_axle_offset, r_track_width, r_steering_sign);
 
-    // Настраиваем подключение к Arduino
+    // Настройка подключения к Arduino
     arduino_.setup(cfg_.host, cfg_.port);
 
-    RCLCPP_INFO(logger_, "Finished Configuration"); // Логируем завершение конфигурации
+    // Выводим сообщение о завершении конфигурации
+    RCLCPP_INFO(this->get_logger(), "Finished Configuration");
 
-    status_ = hardware_interface::status::CONFIGURED; // Устанавливаем статус "СКОНФИГУРИРОВАН"
+    // Обновляем статус оборудования до состояния CONFIGURED
+    status_ = hardware_interface::status::CONFIGURED;
     return return_type::OK;
 }
 
-// Метод запуска контроллера
+// ----------------------------------------------------------------------------------------
+// Метод start
+// ----------------------------------------------------------------------------------------
+// Метод запускает контроллер, отправляя начальные команды на Arduino (например, пустое сообщение
+// для установления связи и настройку PID-параметров).
 return_type DiffDriveArduino::start()
 {
-    RCLCPP_INFO(logger_, "Starting Controller..."); // Логируем запуск контроллера
+    RCLCPP_INFO(this->get_logger(), "Starting Controller...");
 
-    arduino_.sendEmptyMsg(); // Отправляем пустое сообщение на Arduino
-    arduino_.setPidValues(30, 30, 0, 100); // Устанавливаем PID-параметры
+    // Отправляем пустое сообщение на Arduino для инициализации связи.
+    arduino_.sendEmptyMsg();
+    // Устанавливаем PID-параметры для управления двигателями (примерные значения).
+    arduino_.setPidValues(30, 30, 0, 100);
 
-    status_ = hardware_interface::status::STARTED; // Устанавливаем статус "ЗАПУЩЕН"
+    // Обновляем статус оборудования до состояния STARTED.
+    status_ = hardware_interface::status::STARTED;
 
     return return_type::OK;
 }
 
-// Метод остановки контроллера
+// ----------------------------------------------------------------------------------------
+// Метод stop
+// ----------------------------------------------------------------------------------------
+// Метод останавливает контроллер, обновляя статус оборудования до STOPPED.
+// Здесь можно добавить дополнительную логику для корректной остановки оборудования.
 return_type DiffDriveArduino::stop()
 {
-    RCLCPP_INFO(logger_, "Stopping Controller..."); // Логируем остановку контроллера
-    status_ = hardware_interface::status::STOPPED; // Устанавливаем статус "ОСТАНОВЛЕН"
-
+    RCLCPP_INFO(this->get_logger(), "Stopping Controller...");
+    status_ = hardware_interface::status::STOPPED;
     return return_type::OK;
 }
 
-// Метод чтения данных с оборудования (положение и скорость колес)
-hardware_interface::return_type DiffDriveArduino::read()
+// ----------------------------------------------------------------------------------------
+// Метод read
+// ----------------------------------------------------------------------------------------
+// Метод считывает данные с оборудования (например, значения энкодеров), вычисляет угловые
+// скорости колес на основе разницы между текущим и предыдущим значением, а также учитывает
+// прошедшее время (deltaSeconds).
+return_type DiffDriveArduino::read()
 {
-    // Вычисляем разницу времени с последнего вызова
+    // Получаем текущее системное время и вычисляем разницу (deltaSeconds) с предыдущим вызовом.
     auto new_time = std::chrono::system_clock::now();
     std::chrono::duration<double> diff = new_time - time_;
     double deltaSeconds = diff.count();
     time_ = new_time;
 
-    // Проверяем соединение с Arduino
+    // Проверяем, установлено ли соединение с Arduino. Если нет, возвращаем ошибку.
     if (!arduino_.connected())
     {
         return return_type::ERROR;
     }
 
-    // Читаем значения энкодеров с Arduino
+    // Чтение значений энкодеров для каждого из четырёх колес через объект ArduinoComms.
     arduino_.readEncoderValues(fl_wheel_.enc, fr_wheel_.enc, rl_wheel_.enc, rr_wheel_.enc);
 
-    // Вычисляем новое положение и скорость левого переднего колеса
+    // Для каждого колеса обновляем значение положения (угловое положение) и вычисляем скорость
+    // как разницу между новым и предыдущим положением, делённую на deltaSeconds.
     double pos_prev = fl_wheel_.pos;
     fl_wheel_.pos = fl_wheel_.calcEncAngle();
-    fl_wheel_.vel = (fl_wheel_.pos - pos_prev) / deltaSeconds;// Вычисляем скорость вращения левого колеса (угловую скорость) - Разница между текущим и предыдущим положением делится на прошедшее время
+    fl_wheel_.vel = (fl_wheel_.pos - pos_prev) / deltaSeconds;
 
-    // Вычисляем новое положение и скорость правого переднего колеса
     pos_prev = fr_wheel_.pos;
-    fr_wheel_.pos = fr_wheel_.calcEncAngle();// Обновляем текущее положение правого колеса, 
+    fr_wheel_.pos = fr_wheel_.calcEncAngle();
     fr_wheel_.vel = (fr_wheel_.pos - pos_prev) / deltaSeconds;
 
-    // Вычисляем новое положение и скорость левого заднего колеса
     pos_prev = rl_wheel_.pos;
     rl_wheel_.pos = rl_wheel_.calcEncAngle();
-    rl_wheel_.vel = (rl_wheel_.pos - pos_prev) / deltaSeconds;// Вычисляем скорость вращения левого колеса (угловую скорость) - Разница между текущим и предыдущим положением делится на прошедшее время
+    rl_wheel_.vel = (rl_wheel_.pos - pos_prev) / deltaSeconds;
 
-    // Вычисляем новое положение и скорость правого заднего колеса
     pos_prev = rr_wheel_.pos;
-    rr_wheel_.pos = rr_wheel_.calcEncAngle();// Обновляем текущее положение правого колеса, 
+    rr_wheel_.pos = rr_wheel_.calcEncAngle();
     rr_wheel_.vel = (rr_wheel_.pos - pos_prev) / deltaSeconds;
 
     return return_type::OK;
 }
 
-
-hardware_interface::return_type DiffDriveArduino::cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg)
+// ----------------------------------------------------------------------------------------
+// Метод cmdVelCallback
+// ----------------------------------------------------------------------------------------
+// Callback для обработки входящих сообщений типа geometry_msgs::msg::Twist.
+// Извлекает линейную и угловую скорость, обновляет поворотные оси и вычисляет
+// скорости для левой и правой стороны робота, после чего отправляет команды на Arduino.
+return_type DiffDriveArduino::cmdVelCallback(const geometry_msgs::msg::Twist::SharedPtr msg)
 {
-    // Расстояние между колесами
-    double wheel_separation = 0.234f;
+    // Задаём расстояние между колесами (примерное значение)
+    double wheel_separation = 0.234;
 
-    // Получение линейной и угловой скоростей из /cmd_vel
-    double linear_vel = msg->linear.x;
+    // Извлекаем линейную и угловую скорость из сообщения
+    double linear_vel  = msg->linear.x;
     double angular_vel = msg->angular.z;
 
-    // Расчёт углов поворота повротных осей:
+    // Обновляем состояние поворотных осей (стиринг) на основе поступивших скоростей
     f_steering_.update(linear_vel, angular_vel);
     r_steering_.update(linear_vel, angular_vel);
     double f_angle = f_steering_.gegetSteeringAngle();
     double r_angle = r_steering_.gegetSteeringAngle();
 
-    // Расчёт скоростей для левых и правых колёс:
-    double v_left = linear_vel - angular_vel * wheel_separation / 2.0;
+    // Вычисляем скорости для левой и правой сторон робота:
+    // При дифференциальном приводе скорость левой стороны уменьшается, а правой – увеличивается
+    double v_left  = linear_vel - angular_vel * wheel_separation / 2.0;
     double v_right = linear_vel + angular_vel * wheel_separation / 2.0;
 
-    // Отправка команд на Arduino
+    // Отправляем вычисленные команды на Arduino
     sendCommandsToArduino(v_left, v_right, f_angle, r_angle);
+
+    return return_type::OK;
 }
 
-hardware_interface::return_type DiffDriveArduino::sendCommandsToArduino(double v_left, double v_right, double f_angle, double r_angle)
+// ----------------------------------------------------------------------------------------
+// Метод sendCommandsToArduino
+// ----------------------------------------------------------------------------------------
+// Метод отправляет команды управления на Arduino: скорости для двигателей и углы поворотных осей.
+// Здесь происходит проверка соединения, преобразование значений с учётом параметров колеса и
+// частоты цикла, после чего вызываются соответствующие методы объекта ArduinoComms.
+return_type DiffDriveArduino::sendCommandsToArduino(double v_left, double v_right, double f_angle, double r_angle)
 {
-    // Настраиваем подключение к Arduino
+    // Настраиваем подключение к Arduino, используя параметры host и port из конфигурации
     arduino_.setup(cfg_.host, cfg_.port);
-    // Проверяем соединение с Arduino
+    // Проверяем, установлено ли соединение с Arduino
     if (!arduino_.connected())
     {
         return return_type::ERROR;
     }
 
-    // Отправляем управляющие команды на Arduino
-    arduino_.setMotorValues(v_left / fl_wheel_.rads_per_count / cfg_.loop_rate, 
-                            v_right / fr_wheel_.rads_per_count / cfg_.loop_rate,
-                            v_left / rl_wheel_.rads_per_count / cfg_.loop_rate, 
-                            v_right/ rr_wheel_.rads_per_count / cfg_.loop_rate,);
+    // Выводим информационное сообщение с текущими значениями команд
+    RCLCPP_INFO(this->get_logger(),
+                "Sending commands: left=%f, right=%f, front_angle=%f, rear_angle=%f",
+                v_left, v_right, f_angle, r_angle);
+
+    // Отправляем команды для управления двигателями.
+    // Здесь значения команд делятся на коэффициент, рассчитанный по параметру rads_per_count и loop_rate,
+    // что обеспечивает корректное масштабирование команд.
+    arduino_.setMotorValues(v_left  / fl_wheel_.rads_per_count / cfg_.loop_rate, 
+                             v_right / fr_wheel_.rads_per_count / cfg_.loop_rate,
+                             v_left  / rl_wheel_.rads_per_count / cfg_.loop_rate, 
+                             v_right / rr_wheel_.rads_per_count / cfg_.loop_rate);
+
+    // Отправляем команды для управления углами поворотных осей.
+    arduino_.setAngleValues(f_angle / cfg_.loop_rate,
+                            r_angle / cfg_.loop_rate);
 
     return return_type::OK;
-
-
-    RCLCPP_INFO(this->get_logger(), "Sending commands: left=%f, right=%f", v_left, v_right);
 }
 
-hardware_interface::return_type DiffDriveArduino::updateOdometry()
+// ----------------------------------------------------------------------------------------
+// Метод updateOdometry
+// ----------------------------------------------------------------------------------------
+// Метод обновляет одометрию робота. Сначала вызывается метод read() для получения актуальных
+// данных от энкодеров, затем вычисляются линейная и угловая скорости, проводится интегрирование
+// (метод Эйлера) для определения нового положения, и формируется сообщение одометрии, которое публикуется.
+return_type DiffDriveArduino::updateOdometry()
 {
-    // Здесь необходимо считывать данные с Arduino (например, значения энкодеров)
-    // и на их основе вычислять одометрию.
+    // Сначала обновляем данные с оборудования (считываем значения энкодеров)
+    if (read() != return_type::OK) {
+        return return_type::ERROR;
+    }
+    
+    // Получаем текущее время в формате ROS2 и вычисляем прошедшее время (dt) с момента последнего обновления
+    rclcpp::Time current_time = this->now();
+    double dt = (current_time - last_odom_time_).seconds();
+    last_odom_time_ = current_time;
+    
+    // Вычисляем среднюю угловую скорость для левой и правой сторон робота
+    double left_wheel_angular_velocity  = (fl_wheel_.vel + rl_wheel_.vel) / 2.0;
+    double right_wheel_angular_velocity = (fr_wheel_.vel + rr_wheel_.vel) / 2.0;
+    
+    // Преобразуем угловые скорости в линейные скорости с помощью формулы v = r * ω
+    double v_left  = wheel_radius_ * left_wheel_angular_velocity;
+    double v_right = wheel_radius_ * right_wheel_angular_velocity;
+    
+    // Вычисляем линейную скорость робота как среднее значение скоростей левой и правой сторон.
+    // Угловая скорость определяется разностью скоростей, делённой на расстояние между колесами (wheel_base_).
+    double linear_velocity  = (v_left + v_right) / 2.0;
+    double angular_velocity = (v_right - v_left) / wheel_base_;
+    
+    // Интегрируем скорости (методом Эйлера) для вычисления смещения робота за прошедшее время dt.
+    double delta_x     = linear_velocity * std::cos(theta_) * dt;
+    double delta_y     = linear_velocity * std::sin(theta_) * dt;
+    double delta_theta = angular_velocity * dt;
+    
+    // Обновляем положение робота
+    x_     += delta_x;
+    y_     += delta_y;
+    theta_ += delta_theta;
+    
+    // Формируем сообщение одометрии для публикации
     nav_msgs::msg::Odometry odom_msg;
-    odom_msg.header.stamp = this->now();
-    odom_msg.header.frame_id = "odom";
-
-    // Заполните поля сообщения odom_msg:
-    // odom_msg.pose.pose.position, odom_msg.twist.twist.linear, odom_msg.twist.twist.angular и т.д.
-    // Например, если вы рассчитали одометрические данные:
-    // odom_msg.twist.twist.linear.x = calculated_linear_velocity;
-    // odom_msg.twist.twist.angular.z = calculated_angular_velocity;
-
+    odom_msg.header.stamp    = current_time;    // Устанавливаем временную метку сообщения
+    odom_msg.header.frame_id = "odom";          // Фиксированная система координат одометрии
+    odom_msg.child_frame_id  = "base_link";       // Координатная система, привязанная к роботу
+    
+    // Заполняем позиционные данные одометрии
+    odom_msg.pose.pose.position.x = x_;
+    odom_msg.pose.pose.position.y = y_;
+    odom_msg.pose.pose.position.z = 0.0;
+    
+    // Преобразуем угол поворота (yaw) в кватернион для корректного представления ориентации
+    tf2::Quaternion q;
+    q.setRPY(0, 0, theta_);
+    odom_msg.pose.pose.orientation.x = q.x();
+    odom_msg.pose.pose.orientation.y = q.y();
+    odom_msg.pose.pose.orientation.z = q.z();
+    odom_msg.pose.pose.orientation.w = q.w();
+    
+    // Заполняем данные о линейной и угловой скорости
+    odom_msg.twist.twist.linear.x  = linear_velocity;
+    odom_msg.twist.twist.linear.y  = 0.0;
+    odom_msg.twist.twist.linear.z  = 0.0;
+    odom_msg.twist.twist.angular.x = 0.0;
+    odom_msg.twist.twist.angular.y = 0.0;
+    odom_msg.twist.twist.angular.z = angular_velocity;
+    
+    // Публикуем сообщение одометрии
     odom_publisher_->publish(odom_msg);
-}
-
-rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_subscriber_;
-rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_publisher_;
-rclcpp::TimerBase::SharedPtr timer_;
-
-
-
-// Экспорт интерфейсов состояния оборудования (состояние скорости и позиции для каждого колеса)
-std::vector<hardware_interface::StateInterface> DiffDriveArduino::export_state_interfaces()
-{
-    std::vector<hardware_interface::StateInterface> state_interfaces;
-
-    // Добавляем интерфейсы скорости и позиции для левого переднего колеса
-    state_interfaces.emplace_back(hardware_interface::StateInterface(fl_wheel_.name, hardware_interface::HW_IF_VELOCITY, &fl_wheel_.vel));
-    state_interfaces.emplace_back(hardware_interface::StateInterface(fl_wheel_.name, hardware_interface::HW_IF_POSITION, &fl_wheel_.pos));
-
-    // Добавляем интерфейсы скорости и позиции для правого переднего колеса
-    state_interfaces.emplace_back(hardware_interface::StateInterface(fr_wheel_.name, hardware_interface::HW_IF_VELOCITY, &fr_wheel_.vel));
-    state_interfaces.emplace_back(hardware_interface::StateInterface(fr_wheel_.name, hardware_interface::HW_IF_POSITION, &fr_wheel_.pos));
-
-    // Добавляем интерфейсы скорости и позиции для левого заднего колеса
-    state_interfaces.emplace_back(hardware_interface::StateInterface(rl_wheel_.name, hardware_interface::HW_IF_VELOCITY, &rl_wheel_.vel));
-    state_interfaces.emplace_back(hardware_interface::StateInterface(rl_wheel_.name, hardware_interface::HW_IF_POSITION, &rl_wheel_.pos));
-
-    // Добавляем интерфейсы скорости и позиции для правого заднего колеса
-    state_interfaces.emplace_back(hardware_interface::StateInterface(rr_wheel_.name, hardware_interface::HW_IF_VELOCITY, &rr_wheel_.vel));
-    state_interfaces.emplace_back(hardware_interface::StateInterface(rr_wheel_.name, hardware_interface::HW_IF_POSITION, &rr_wheel_.pos));
-
-    return state_interfaces;
-}
-
-// Экспорт интерфейсов команд (команды скорости для каждого колеса)
-std::vector<hardware_interface::CommandInterface> DiffDriveArduino::export_command_interfaces()
-{
-    std::vector<hardware_interface::CommandInterface> command_interfaces;
-
-    // Добавляем командные интерфейсы для управления скоростью передних колес
-    command_interfaces.emplace_back(hardware_interface::CommandInterface(fl_wheel_.name, hardware_interface::HW_IF_VELOCITY, &fl_wheel_.cmd));
-    command_interfaces.emplace_back(hardware_interface::CommandInterface(fr_wheel_.name, hardware_interface::HW_IF_VELOCITY, &fr_wheel_.cmd));
-
-     // Добавляем командные интерфейсы для управления скоростью задних колес
-    command_interfaces.emplace_back(hardware_interface::CommandInterface(rl_wheel_.name, hardware_interface::HW_IF_VELOCITY, &rl_wheel_.cmd));
-    command_interfaces.emplace_back(hardware_interface::CommandInterface(rr_wheel_.name, hardware_interface::HW_IF_VELOCITY, &rr_wheel_.cmd));
-
-    return command_interfaces;
-}
-
-
-// Метод записи команд в оборудование (отправка управляющих сигналов на Arduino)
-hardware_interface::return_type DiffDriveArduino::write()
-{
-    // Проверяем соединение с Arduino
-    if (!arduino_.connected())
-    {
-        return return_type::ERROR;
-    }
-
-    // Отправляем управляющие команды на Arduino
-    arduino_.setMotorValues(fl_wheel_.cmd / fl_wheel_.rads_per_count / cfg_.loop_rate, 
-                            fr_wheel_.cmd / fr_wheel_.rads_per_count / cfg_.loop_rate,
-                            rl_wheel_.cmd / rl_wheel_.rads_per_count / cfg_.loop_rate, 
-                            rr_wheel_.cmd / rr_wheel_.rads_per_count / cfg_.loop_rate);
-
+    
+    // Выводим отладочное сообщение с текущими значениями одометрии (x, y, theta)
+    RCLCPP_DEBUG(this->get_logger(), "Odometry: x=%.2f, y=%.2f, theta=%.2f", x_, y_, theta_);
+    
     return return_type::OK;
 }
 
-// Подключение класса в систему плагинов ROS 2
+// ----------------------------------------------------------------------------------------
+// Подключение класса в систему плагинов ROS2
+// ----------------------------------------------------------------------------------------
+// Этот макрос позволяет системе плагинов ROS2 обнаруживать и загружать данный класс как аппаратный интерфейс.
 #include "pluginlib/class_list_macros.hpp"
-
 PLUGINLIB_EXPORT_CLASS(
   DiffDriveArduino,
   hardware_interface::SystemInterface
 )
-
