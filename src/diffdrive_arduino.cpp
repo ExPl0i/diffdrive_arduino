@@ -313,8 +313,8 @@ return_type DiffDriveArduino::updateOdometry()
 
     // 4. Получаем углы поворотных осей (стиринга) для передней и задней осей.
     //    Предполагается, что метод gegetSteeringAngle() возвращает угол в градусах.
-    double theta_f = f_steering_.gegetSteeringAngle();  // Угол переднего стиринга (градусы)
-    double theta_r = r_steering_.gegetSteeringAngle();   // Угол заднего стиринга (градусы)
+    double theta_f = f_steering_.getSteeringAngle();  // Угол переднего стиринга (градусы)
+    double theta_r = r_steering_.getSteeringAngle();   // Угол заднего стиринга (градусы)
     
     // 5. Задаём параметры, необходимые для расчёта:
     //    L_f и L_r — расстояния, используемые в расчётах (например, расстояния от осей до центра поворота);
