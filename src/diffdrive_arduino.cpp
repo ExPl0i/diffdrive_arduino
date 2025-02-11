@@ -281,7 +281,7 @@ return_type DiffDriveArduino::sendCommandsToArduino(double v_left, double v_righ
                 v_left, v_right, f_angle, r_angle);
 
     // Отправляем команды для управления двигателями и углами поворота
-    arduino_.setMotorValues(f_angle, r_angle, v_left, v_right);
+    arduino_.setMotorValues(f_angle / r_angle / v_left / v_right / cfg_.loop_rate);
 
     return return_type::OK;
 }
