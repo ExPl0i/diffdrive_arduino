@@ -65,6 +65,7 @@ public:
   // Метод для обновления одометрии робота и публикации соответствующего сообщения
   return_type updateOdometry();
 
+
 private:
   // Паблишер для публикации сообщений одометрии (напр., топик "odom")
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_publisher_;
@@ -94,7 +95,7 @@ private:
   Steering r_steering_;  // Задняя ось (стиринг)
 
   // Статус оборудования (например, UNKNOWN, CONFIGURED, STARTED, STOPPED)
-  int status_ = hardware_interface::status::UNKNOWN;
+  hardware_interface::status status_ = hardware_interface::status::UNKNOWN;
 
   // Временные метки для вычисления разницы времени между итерациями (для расчёта скоростей)
   std::chrono::time_point<std::chrono::system_clock> time_;

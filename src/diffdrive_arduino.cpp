@@ -37,8 +37,8 @@ DiffDriveArduino::DiffDriveArduino()
     theta_ = 0.0;
     
     // Задаём базовые параметры робота:
-    wheel_radius_ = 0.1; // Радиус колеса в метрах
-    wheel_base_   = 0.5; // Расстояние между левыми и правыми колесами (база робота) в метрах
+    wheel_radius_ = 0.08; // Радиус колеса в метрах
+    wheel_base_   = 0.234; // Расстояние между левыми и правыми колесами (база робота) в метрах
 }
 
 // ----------------------------------------------------------------------------------------
@@ -387,6 +387,11 @@ return_type DiffDriveArduino::updateOdometry()
     
     return return_type::OK;
 }
+
+std::vector<hardware_interface::StateInterface> export_state_interfaces() override { return {}; }
+std::vector<hardware_interface::CommandInterface> export_command_interfaces() override { return {}; }
+hardware_interface::return_type write() override { return hardware_interface::return_type::OK; }
+
 
 // ----------------------------------------------------------------------------------------
 // Подключение класса в систему плагинов ROS2

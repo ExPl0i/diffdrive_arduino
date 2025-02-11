@@ -66,7 +66,7 @@ void ArduinoComms::readEncoderValues(int &val_1, int &val_2, int &val_3, int &va
 void ArduinoComms::setMotorValues(float val_1, float val_2, float val_3, float val_4)
 {
     std::stringstream ss;
-    ss << "[" << val_1 << "," << val_2 << "," << val_3 * 0.95f << "," << val_4 * 0.95f << "," << val_1 + val_2 + val_3, + val_4 << "]";
+    ss << "[" << val_1 << "," << val_2 << "," << val_3 * 0.95f << "," << val_4 * 0.95f << "," << (val_1 + val_2 + val_3 + val_4) << "]";
 
     sendMsg(ss.str()); // Отправляем команду на Arduino
 }
