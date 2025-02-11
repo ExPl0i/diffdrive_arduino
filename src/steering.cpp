@@ -15,11 +15,8 @@ Steering::Steering(double axle_offset, double track_width, double steering_sign)
 // Метод настройки оси
 void Steering::setup(const std::string &steering_name, double axle_offset, double track_width, double steering_sign)
 {
+  Steering(axle_offset, track_width, steering_sign);
   name = steering_name;  // Присваиваем оси имя, переданное в аргументах
-  axle_offset_ = axle_offset;
-  track_width_ = track_width;
-  steering_sign_ = steering_sign;
-  steering_angle_ = 0.0f;
 }
 
 /**

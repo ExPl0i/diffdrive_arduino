@@ -16,7 +16,7 @@ public:
 
   void setup(const std::string &host, int port);
   void sendEmptyMsg();
-  void readEncoderValues(int &val_1, int &val_2);
+  void readEncoderValues(int &val_1, int &val_2, int &val_3, int &val_4);
   void setMotorValues(float val_1, float val_2, float val_3, float val_4);
   void setPidValues(float k_p, float k_d, float k_i, float k_o);
 

@@ -245,8 +245,8 @@ return_type DiffDriveArduino::cmdVelCallback(const geometry_msgs::msg::Twist::Sh
     // Обновляем состояние поворотных осей (стиринг) на основе поступивших скоростей
     f_steering_.update(linear_vel, angular_vel);
     r_steering_.update(linear_vel, angular_vel);
-    double f_angle = f_steering_.gegetSteeringAngle();
-    double r_angle = r_steering_.gegetSteeringAngle();
+    double f_angle = f_steering_.getSteeringAngle();
+    double r_angle = r_steering_.getSteeringAngle();
 
     // Вычисляем скорости для левой и правой сторон робота:
     // При дифференциальном приводе скорость левой стороны уменьшается, а правой – увеличивается
@@ -281,7 +281,7 @@ return_type DiffDriveArduino::sendCommandsToArduino(double v_left, double v_righ
                 v_left, v_right, f_angle, r_angle);
 
     // Отправляем команды для управления двигателями и углами поворота
-    arduino_.setMotorValues(f_angle / r_angle / v_left  / v_right / cfg_.loop_rate);
+    arduino_.setMotorValues(f_angle, r_angle, v_left, v_right);
 
     return return_type::OK;
 }
@@ -329,7 +329,7 @@ return_type DiffDriveArduino::updateOdometry()
     //    а также параметры L_f, L_r и W. Метод должен вернуть пару значений:
     //       - linear_velocity: линейная скорость транспортного средства (V)
     //       - angular_velocity: угловая скорость транспортного средства (ω)
-    std::pair<double, double> speed_and_omega = f_steering_.computeVehicleSpeedAndOmega(
+    std::pair<double, double> speed, omega = f_steering_.computeVehicleSpeedAndOmega(
           V_FL, V_FR, V_RL, V_RR,  // Скорости для всех четырёх колес
           theta_f, theta_r,        // Углы поворотных осей (градусы)
           L_f, L_r,                // Параметры для расчёта (расстояния)

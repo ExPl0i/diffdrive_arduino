@@ -31,7 +31,7 @@ void ArduinoComms::sendEmptyMsg()
 }
 
 // Читает значения энкодеров с Arduino
-void ArduinoComms::readEncoderValues(int &val_1, int &val_2)
+void ArduinoComms::readEncoderValues(int &val_1, int &val_2, int &val_3, int &val_4)
 {
     // Отправка запроса на получение данных с энкодеров
     // sendMsg("e\r"); // Закомментировано, но можно раскомментировать для явного запроса
@@ -44,10 +44,12 @@ void ArduinoComms::readEncoderValues(int &val_1, int &val_2)
     std::smatch matches;
     
     // Проверяем, соответствует ли ответ ожидаемому формату
-    if (std::regex_search(response, matches, regex) && matches.size() == 3)
+    if (std::regex_search(response, matches, regex) && matches.size() == 5)
     {
         val_1 = std::stoi(matches[1].str()); // Преобразуем первую строку в число (левый энкодер)
         val_2 = std::stoi(matches[2].str()); // Преобразуем вторую строку в число (правый энкодер)
+        val_3 = std::stoi(matches[3].str());
+        val_4 = std::stoi(matches[4].str());
     }
     else
     {
@@ -55,6 +57,8 @@ void ArduinoComms::readEncoderValues(int &val_1, int &val_2)
         std::cerr << "Received message with incorrect format: " << response << std::endl;
         val_1 = 0;
         val_2 = 0;
+        val_3 = 0;
+        val_4 = 0;
     }
 }
 
