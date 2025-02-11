@@ -388,9 +388,9 @@ return_type DiffDriveArduino::updateOdometry()
     return return_type::OK;
 }
 
-std::vector<hardware_interface::StateInterface> export_state_interfaces() override { return {}; }
-std::vector<hardware_interface::CommandInterface> export_command_interfaces() override { return {}; }
-hardware_interface::return_type write() override { return hardware_interface::return_type::OK; }
+std::vector<hardware_interface::StateInterface> export_state_interfaces() { return {}; }
+std::vector<hardware_interface::CommandInterface> export_command_interfaces() { return {}; }
+hardware_interface::return_type write() { return hardware_interface::return_type::OK; }
 
 
 // ----------------------------------------------------------------------------------------
