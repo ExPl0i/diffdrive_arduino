@@ -30,6 +30,8 @@ public:
      */
     Steering(const std::string &steering_name, double axle_offset, double track_width, double steering_sign = 1.0f);
 
+    Steering() = default;
+
     /**
      * @brief Вычисляет угол поворота оси на основании заданных скоростей.
      * @param linear_velocity Линейная скорость робота (v).

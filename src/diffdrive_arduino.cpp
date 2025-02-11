@@ -329,7 +329,7 @@ return_type DiffDriveArduino::updateOdometry()
     //    а также параметры L_f, L_r и W. Метод должен вернуть пару значений:
     //       - linear_velocity: линейная скорость транспортного средства (V)
     //       - angular_velocity: угловая скорость транспортного средства (ω)
-    std::pair<double, double> speed_andomega = f_steering_.computeVehicleSpeedAndOmega(
+    std::pair<double, double> speed_and_omega = f_steering_.computeVehicleSpeedAndOmega(
           V_FL, V_FR, V_RL, V_RR,  // Скорости для всех четырёх колес
           theta_f, theta_r,        // Углы поворотных осей (градусы)
           L_f, L_r,                // Параметры для расчёта (расстояния)

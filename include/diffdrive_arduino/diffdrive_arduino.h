@@ -65,6 +65,11 @@ public:
   // Метод для обновления одометрии робота и публикации соответствующего сообщения
   return_type updateOdometry();
 
+  std::vector<hardware_interface::StateInterface> export_state_interfaces() override;
+
+  std::vector<hardware_interface::CommandInterface> export_command_interfaces() override;
+
+  return_type write() override;
 
 private:
   // Паблишер для публикации сообщений одометрии (напр., топик "odom")
