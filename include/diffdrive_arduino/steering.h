@@ -28,7 +28,7 @@ public:
      * @param track_width Расстояние между колёсами оси.
      * @param steering_sign Направление поворота оси (+1 или -1).
      */
-    Steering(double axle_offset, double track_width, double steering_sign = 1.0f);
+    Steering(const std::string &steering_name, double axle_offset, double track_width, double steering_sign = 1.0f);
 
     /**
      * @brief Вычисляет угол поворота оси на основании заданных скоростей.
