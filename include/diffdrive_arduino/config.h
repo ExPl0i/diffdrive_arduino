@@ -12,7 +12,7 @@ struct Config
     std::string rear_left_wheel_name = "rear_left_wheel";
     std::string rear_right_wheel_name = "rear_right_wheel";
     float loop_rate = 60;
-    std::string host = "172.20.76.80"; // IP-адрес вашего UDP-устройства
+    std::string host = "10.5.5.20"; // IP-адрес вашего UDP-устройства
     int port = 5000; // Порт вашего UDP-устройства
     int enc_counts_per_rev = 150;
 };
